@@ -301,14 +301,13 @@ EOF
 
 voice_conversation() {
   log "voice_conversation() called"
-  
+
   # Create a temporary script that will run in Terminal
   local temp_script
   temp_script=$(mktemp)
-  
+
   cat > "$temp_script" << 'VOICE_SCRIPT_EOF'
 #!/usr/bin/env bash
-set -e
 
 # Add Homebrew to PATH (required for ffmpeg)
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -385,12 +384,67 @@ VOICE="${TTS_VOICE:-Lee (Premium)}"
 while true; do
   # Use a temp file to capture just the answer (stdout only)
   ANSWER_FILE=$(mktemp)
+  retry_count=0
+  max_retries=3
 
-  # Run with unbuffered output, stderr displays progress, stdout goes to file
-  "$PYTHON" -u scripts/voice_ask.py --conversation > "$ANSWER_FILE"
-  EXIT_CODE=$?
+  # Retry loop for handling crashes
+  while [[ $retry_count -lt $max_retries ]]; do
+    # Run with unbuffered output, stderr displays progress, stdout goes to file
+    # Using tiny model for better stability (faster, less memory, fewer crashes)
+    "$PYTHON" -u scripts/voice_ask.py --conversation --model tiny > "$ANSWER_FILE"
+    EXIT_CODE=$?
 
-  if [[ $EXIT_CODE -eq 0 ]]; then
+    # Check exit code
+    # Note: Segfault (signal 11) produces exit code 139 (128 + 11)
+    if [[ $EXIT_CODE -eq 0 ]]; then
+      # Success! Break out of retry loop
+      break
+    elif [[ $EXIT_CODE -eq 130 ]]; then
+      # User cancelled (Ctrl+C)
+      echo ""
+      echo "👋 Exiting voice conversation..."
+      echo ""
+      rm -f "$ANSWER_FILE"
+      break 2  # Break out of both loops
+    elif [[ $EXIT_CODE -eq 139 ]] || [[ $EXIT_CODE -eq 11 ]] || [[ $EXIT_CODE -ge 128 ]]; then
+      # Segmentation fault or other signal (139 = 128+11, or any signal-based exit)
+      retry_count=$((retry_count + 1))
+      echo ""
+      echo "⚠️  Crash detected (exit code: $EXIT_CODE). Retrying ($retry_count/$max_retries)..."
+      echo ""
+      sleep 1
+      rm -f "$ANSWER_FILE"
+      ANSWER_FILE=$(mktemp)
+    elif [[ $EXIT_CODE -eq 1 ]]; then
+      # Normal error - likely user cancelled or empty input
+      echo ""
+      echo "👋 Exiting voice conversation..."
+      echo ""
+      rm -f "$ANSWER_FILE"
+      break 2
+    else
+      # Unknown error - retry anyway
+      retry_count=$((retry_count + 1))
+      echo ""
+      echo "⚠️  Error (exit code: $EXIT_CODE). Retrying ($retry_count/$max_retries)..."
+      echo ""
+      sleep 1
+      rm -f "$ANSWER_FILE"
+      ANSWER_FILE=$(mktemp)
+    fi
+  done
+
+  # Check if we exhausted retries
+  if [[ $retry_count -ge $max_retries ]]; then
+    echo ""
+    echo "❌ Failed after $max_retries attempts. Please try again."
+    echo ""
+    rm -f "$ANSWER_FILE"
+    break
+  fi
+
+  # Check if we got a valid answer
+  if [[ $EXIT_CODE -eq 0 ]] && [[ -f "$ANSWER_FILE" ]] && [[ -s "$ANSWER_FILE" ]]; then
     # Get the full answer (all of stdout)
     answer=$(cat "$ANSWER_FILE")
 
@@ -410,12 +464,6 @@ while true; do
     echo "=========================================="
     echo ""
     # Loop automatically continues to next exchange
-  else
-    # User cancelled or error occurred
-    echo ""
-    echo "👋 Exiting voice conversation..."
-    echo ""
-    break
   fi
 
   rm -f "$ANSWER_FILE"

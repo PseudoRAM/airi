@@ -57,6 +57,7 @@ class ConversationManager:
                 openai_api_base=OPENAI_BASE,
                 model=WORKSPACE_SLUG,
                 temperature=0.7,
+                request_timeout=30.0,  # 30 second timeout to prevent hanging
             )
         return self._llm
     
@@ -101,15 +102,27 @@ class ConversationManager:
         Returns:
             The assistant's response
         """
+        import sys
+
         # Log user message
         self._log(f"USER: {user_message}")
 
         # Build full message history
         messages = self._build_messages(user_message)
 
-        # Get response from LLM
-        response = self.llm.invoke(messages)
-        assistant_message = (response.content or "").strip()
+        # Get response from LLM with timeout handling
+        try:
+            print("🔗 Contacting AI...", file=sys.stderr, flush=True)
+            response = self.llm.invoke(messages)
+            assistant_message = (response.content or "").strip()
+        except Exception as e:
+            error_msg = str(e)
+            if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+                print(f"❌ Request timed out after 30 seconds", file=sys.stderr, flush=True)
+                raise RuntimeError("AI request timed out. Check your AnythingLLM connection.")
+            else:
+                print(f"❌ AI request failed: {error_msg}", file=sys.stderr, flush=True)
+                raise
 
         # Add to conversation history
         self.conversation_history.append(("user", user_message))
