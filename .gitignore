@@ -5,3 +5,5 @@
 FIXES_APPLIED.md
 INSTALL_FFMPEG.md
 *.md
+/scripts/__pycache__
+/scripts/__pycache__

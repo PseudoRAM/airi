@@ -27,46 +27,30 @@ except ImportError as e:
 
 def main():
     """Run the live conversation loop."""
-    print("", file=sys.stderr)
-    print("=" * 60, file=sys.stderr)
-    print("   🎙️  LIVE CONVERSATION MODE", file=sys.stderr)
-    print("=" * 60, file=sys.stderr)
-    print("", file=sys.stderr)
-    print("This mode will:", file=sys.stderr)
-    print("  • Start recording automatically", file=sys.stderr)
-    print("  • Detect when you stop speaking (2s silence)", file=sys.stderr)
-    print("  • Get AI response and speak it back", file=sys.stderr)
-    print("  • Loop continuously", file=sys.stderr)
-    print("", file=sys.stderr)
-    print("Press Ctrl+C at any time to exit", file=sys.stderr)
-    print("", file=sys.stderr)
-    print("=" * 60, file=sys.stderr)
-    print("", file=sys.stderr)
+    import random
 
-    # Initialize components
-    print("🔧 Initializing...", file=sys.stderr, flush=True)
+    # Simple, clean startup message
+    print("", file=sys.stderr)
+    print(f"🎙️  Airi is running...", file=sys.stderr, flush=True)
+    print("", file=sys.stderr, flush=True)
+
+    # Initialize components (this may take a moment for Whisper model loading)
+    print("🔧 Loading AI models...", file=sys.stderr, flush=True)
     recorder = VoiceRecorder(model_size="base")
 
-    # Load or create conversation
+    # Force Whisper model to load now (lazy loading otherwise happens on first use)
+    _ = recorder.whisper_model
+
     manager = load_conversation()
-    turn_count = len(manager.conversation_history) // 2
-
-    if turn_count > 0:
-        print(f"✅ Loaded existing conversation ({turn_count} exchanges)", file=sys.stderr, flush=True)
-    else:
-        print("✅ Starting new conversation", file=sys.stderr, flush=True)
-
+    print("✅ Ready!", file=sys.stderr, flush=True)
     print("", file=sys.stderr, flush=True)
 
     # Main conversation loop
+    turn_count = len(manager.conversation_history) // 2
     turn_number = turn_count + 1
 
     try:
         while True:
-            print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", file=sys.stderr)
-            print(f"Turn {turn_number}", file=sys.stderr)
-            print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", file=sys.stderr)
-            print("", file=sys.stderr, flush=True)
 
             # Record with silence detection
             try:
@@ -104,13 +88,9 @@ def main():
 
             # Check if transcription is empty
             if not question.strip():
-                print("⚠️  No speech detected, listening again...", file=sys.stderr, flush=True)
-                print("", file=sys.stderr, flush=True)
                 continue
 
-            print("", file=sys.stderr, flush=True)
             print(f"📝 You: {question}", file=sys.stderr, flush=True)
-            print("", file=sys.stderr, flush=True)
 
             # Get AI response
             print("💭 Thinking...", file=sys.stderr, flush=True)
@@ -123,26 +103,17 @@ def main():
                 traceback.print_exc(file=sys.stderr)
                 continue
 
-            print("", file=sys.stderr, flush=True)
-            print(f"🤖 AI: {answer}", file=sys.stderr, flush=True)
-            print("", file=sys.stderr, flush=True)
+            print(f"🤖 Airi: {answer}", file=sys.stderr, flush=True)
 
-            # Output answer to stdout (for shell script to capture if needed)
+            # Output answer to stdout (for shell script to capture for TTS)
             print(answer)
             sys.stdout.flush()
 
             # Increment turn counter
             turn_number += 1
 
-            print("", file=sys.stderr, flush=True)
-
     except KeyboardInterrupt:
-        print("\n\n👋 Exiting live conversation mode...", file=sys.stderr)
-
-    print("", file=sys.stderr)
-    print("=" * 60, file=sys.stderr)
-    print("Conversation ended. History has been saved.", file=sys.stderr)
-    print("=" * 60, file=sys.stderr)
+        print("\n\n👋 Goodbye!", file=sys.stderr)
 
 
 if __name__ == "__main__":

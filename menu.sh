@@ -372,21 +372,35 @@ fi
 echo "Starting voice conversation..."
 echo ""
 
-if "$PYTHON" scripts/voice_ask.py --conversation 2>&1 | tee /tmp/voice_output.txt; then
+# Load TTS voice from config
+STATE_DIR="$HOME/Library/Application Support/AnythingLLM-Menu"
+CONFIG_FILE="$STATE_DIR/.env"
+if [[ -f "$CONFIG_FILE" ]]; then
+  source "$CONFIG_FILE"
+fi
+VOICE="${TTS_VOICE:-Lee (Premium)}"
+
+# Use a temp file to capture just the answer (stdout)
+ANSWER_FILE=$(mktemp)
+
+# Run with unbuffered output, show all progress, capture answer separately
+"$PYTHON" -u scripts/voice_ask.py --conversation 2>&1 | tee "$ANSWER_FILE"
+EXIT_CODE=${PIPESTATUS[0]}
+
+if [[ $EXIT_CODE -eq 0 ]]; then
   # Get the last line as the answer
-  answer=$(tail -1 /tmp/voice_output.txt)
-  
+  answer=$(tail -1 "$ANSWER_FILE")
+
   echo ""
   echo "✅ Response received!"
   echo ""
-  
+
   # Save answer
   echo "$answer" > "$LAST_TXT"
-  
-  # Speak the answer
-  VOICE="${TTS_VOICE:-Lee (Premium)}"
-  say -v "$VOICE" "$answer" &
-  
+
+  # Speak the answer (blocking - wait for it to finish)
+  say -v "$VOICE" "$answer"
+
   echo "=========================================="
   echo "Press any key to close..."
   read -n 1 -s
@@ -398,7 +412,7 @@ else
   read -n 1 -s
 fi
 
-rm -f /tmp/voice_output.txt
+rm -f "$ANSWER_FILE"
 VOICE_SCRIPT_EOF
 
   chmod +x "$temp_script"
@@ -493,30 +507,29 @@ if [[ ! -f "scripts/live_conversation.py" ]]; then
 fi
 
 # Start live conversation loop with TTS
-echo "Starting live conversation mode..."
-echo ""
-echo "🎙️  Speak naturally - the system will detect when you stop"
-echo "🔇 After 2 seconds of silence, it will process your speech"
-echo "🤖 The AI will respond and speak back to you"
-echo "🔁 This will loop continuously until you press Ctrl+C"
 echo ""
 
-# Run the Python script and pipe each response through say
-"$PYTHON" scripts/live_conversation.py 2>&1 | while IFS= read -r line; do
-  # Check if this line looks like an AI response (not stderr output with emojis/formatting)
-  # We'll speak lines that are printed to stdout by the Python script
-  # The Python script prints the answer to stdout after the "AI:" message to stderr
-  if [[ ! "$line" =~ ^[🎙️🔧🔇📝💭🤖✅❌⚠️━═] ]] && [[ -n "$line" ]]; then
-    # This is the AI response, speak it
-    say -v "$VOICE" "$line" &
-  fi
+# Announce startup with TTS
+say -v "$VOICE" "Airi is running"
+
+# Run the Python script with unbuffered output (-u flag) and handle TTS in real-time
+"$PYTHON" -u scripts/live_conversation.py 2>&1 | while IFS= read -r line; do
   # Always echo the line to show progress
   echo "$line"
+
+  # Check if this line looks like an AI response (not stderr output with emojis/formatting)
+  # The Python script prints the answer to stdout after the "AI:" message to stderr
+  if [[ ! "$line" =~ ^[🎙️🔧🔇📝💭🤖✅❌⚠️━═👂🔊] ]] && \
+     [[ ! "$line" =~ ^Turn ]] && \
+     [[ ! "$line" =~ ^=+ ]] && \
+     [[ ! "$line" =~ ^LIVE ]] && \
+     [[ -n "$line" ]]; then
+    # This is the AI response, speak it (blocking - wait for it to finish)
+    say -v "$VOICE" "$line"
+  fi
 done
 
 echo ""
-echo "=========================================="
-echo "Live conversation ended."
 echo "Press any key to close..."
 read -n 1 -s
 LIVE_SCRIPT_EOF

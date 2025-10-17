@@ -60,28 +60,18 @@ class VoiceRecorder:
     def whisper_model(self):
         """Lazy load Whisper model."""
         if self._whisper_model is None:
-            print(f"\n🔧 Loading Whisper model ({self.model_size})...", file=sys.stderr, flush=True)
-            print(f"   This may take 30-60 seconds on first run...", file=sys.stderr, flush=True)
-            print(f"   Starting model download/load...", file=sys.stderr, flush=True)
-            sys.stderr.flush()
-
             try:
-                import time
-                start_time = time.time()
-                print(f"   [DEBUG] Calling whisper.load_model('{self.model_size}')...", file=sys.stderr, flush=True)
-                sys.stderr.flush()
+                import os
+                import contextlib
 
-                self._whisper_model = whisper.load_model(self.model_size)
+                # Suppress Whisper's verbose output during loading
+                with open(os.devnull, 'w') as devnull:
+                    with contextlib.redirect_stderr(devnull):
+                        self._whisper_model = whisper.load_model(self.model_size)
 
-                elapsed = time.time() - start_time
-                print(f"   [DEBUG] Model loaded in {elapsed:.1f} seconds", file=sys.stderr, flush=True)
-                print("✅ Model loaded successfully!", file=sys.stderr, flush=True)
-                sys.stderr.flush()
             except Exception as e:
-                print(f"❌ Failed to load model: {e}", file=sys.stderr, flush=True)
-                print(f"   Error type: {type(e).__name__}", file=sys.stderr, flush=True)
+                print(f"❌ Failed to load Whisper model: {e}", file=sys.stderr, flush=True)
                 import traceback
-                print("   Full traceback:", file=sys.stderr, flush=True)
                 traceback.print_exc(file=sys.stderr)
                 sys.stderr.flush()
                 raise
@@ -119,50 +109,33 @@ class VoiceRecorder:
         Returns:
             Path to the temporary WAV file
         """
-        print("   [DEBUG] stop_recording() called", file=sys.stderr, flush=True)
-        
         if not self.is_recording:
             raise RuntimeError("Not currently recording")
 
-        print("   [DEBUG] Setting is_recording = False", file=sys.stderr, flush=True)
         self.is_recording = False
 
         # Stop and close the stream
-        print("   [DEBUG] Stopping audio stream...", file=sys.stderr, flush=True)
         if self.stream:
             self.stream.stop_stream()
-            print("   [DEBUG] Stream stopped", file=sys.stderr, flush=True)
             self.stream.close()
-            print("   [DEBUG] Stream closed", file=sys.stderr, flush=True)
 
-        print("   [DEBUG] Terminating PyAudio...", file=sys.stderr, flush=True)
         if self.audio:
             self.audio.terminate()
-            print("   [DEBUG] PyAudio terminated", file=sys.stderr, flush=True)
-
-        print("🛑 Recording stopped", file=sys.stderr, flush=True)
 
         # Save to temporary file
-        print("   [DEBUG] Creating temp file...", file=sys.stderr, flush=True)
         temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         temp_path = temp_file.name
         temp_file.close()
-        print(f"   [DEBUG] Temp file created: {temp_path}", file=sys.stderr, flush=True)
 
-        print(f"   [DEBUG] Writing WAV file with {len(self.frames)} frames...", file=sys.stderr, flush=True)
         try:
             with wave.open(temp_path, 'wb') as wf:
                 wf.setnchannels(self.channels)
                 wf.setsampwidth(self.audio.get_sample_size(self.sample_format) if self.audio else 2)
                 wf.setframerate(self.rate)
                 wf.writeframes(b''.join(self.frames))
-            print("   [DEBUG] WAV file written successfully", file=sys.stderr, flush=True)
         except Exception as e:
-            print(f"   [DEBUG] ERROR writing WAV: {e}", file=sys.stderr, flush=True)
-            raise
+            raise RuntimeError(f"Failed to save audio: {e}")
 
-        print(f"📁 Audio saved to: {temp_path}", file=sys.stderr, flush=True)
-        print("   [DEBUG] stop_recording() returning", file=sys.stderr, flush=True)
         return temp_path
 
     def record_chunk(self):
@@ -194,24 +167,156 @@ class VoiceRecorder:
         normalized = rms / 32767.0
         return normalized
 
-    def record_until_silence(self, silence_threshold: float = 0.01, silence_duration: float = 2.0) -> str:
+    def is_speech(self, data: bytes, energy_threshold: float = 0.02) -> bool:
+        """
+        Detect if audio contains speech using energy and spectral analysis.
+
+        This helps distinguish actual speech from constant background noise.
+
+        Args:
+            data: Audio data bytes
+            energy_threshold: Minimum energy level for speech
+
+        Returns:
+            True if speech is detected, False otherwise
+        """
+        # Convert bytes to numpy array
+        audio_array = np.frombuffer(data, dtype=np.int16).astype(np.float32)
+
+        # Calculate RMS energy
+        rms = np.sqrt(np.mean(audio_array ** 2)) / 32767.0
+
+        # If energy is too low, it's not speech
+        if rms < energy_threshold:
+            return False
+
+        # Check zero-crossing rate (speech has moderate ZCR, noise is often very low or very high)
+        zero_crossings = np.sum(np.abs(np.diff(np.sign(audio_array)))) / 2
+        zcr = zero_crossings / len(audio_array)
+
+        # Speech typically has ZCR between 0.02 and 0.3
+        # Pure tones/hums have very low ZCR
+        # High-frequency noise has very high ZCR
+        if zcr < 0.01 or zcr > 0.4:
+            return False
+
+        # Check spectral characteristics using FFT
+        fft = np.fft.rfft(audio_array)
+        magnitude = np.abs(fft)
+
+        # Speech has significant energy in multiple frequency bands
+        # Divide spectrum into low (0-500Hz), mid (500-2000Hz), high (2000-4000Hz)
+        freq_bins = len(magnitude)
+        low_band = magnitude[:int(freq_bins * 0.125)]  # ~0-1000Hz at 16kHz sample rate
+        mid_band = magnitude[int(freq_bins * 0.125):int(freq_bins * 0.5)]  # ~1000-4000Hz
+        high_band = magnitude[int(freq_bins * 0.5):int(freq_bins * 0.75)]  # ~4000-6000Hz
+
+        low_energy = np.mean(low_band)
+        mid_energy = np.mean(mid_band)
+        high_energy = np.mean(high_band)
+
+        # Speech typically has higher mid-band energy
+        # Background hum/noise often concentrated in low frequencies
+        total_energy = low_energy + mid_energy + high_energy
+        if total_energy == 0:
+            return False
+
+        mid_ratio = mid_energy / total_energy
+
+        # Speech should have at least 25% of energy in mid-band
+        if mid_ratio < 0.25:
+            return False
+
+        return True
+
+    def wait_for_sound(self, sound_threshold: float = 0.02, check_duration: float = 0.5,
+                      consecutive_chunks: int = 3) -> bool:
+        """
+        Wait until speech is detected above the threshold.
+
+        Args:
+            sound_threshold: RMS level above which audio is considered sound (0.0-1.0)
+            check_duration: How long to wait before checking again (seconds)
+            consecutive_chunks: Number of consecutive chunks with speech to confirm (reduces false positives)
+
+        Returns:
+            True if speech was detected, False if interrupted
+        """
+        print(f"👂 Listening...", end='', file=sys.stderr, flush=True)
+
+        # Initialize PyAudio temporarily just to listen
+        audio = pyaudio.PyAudio()
+        try:
+            stream = audio.open(
+                format=self.sample_format,
+                channels=self.channels,
+                rate=self.rate,
+                frames_per_buffer=self.chunk,
+                input=True
+            )
+
+            try:
+                speech_count = 0
+                while True:
+                    # Read a chunk
+                    data = stream.read(self.chunk, exception_on_overflow=False)
+
+                    # Use speech detection instead of just level
+                    if self.is_speech(data, energy_threshold=sound_threshold):
+                        speech_count += 1
+                        if speech_count >= consecutive_chunks:
+                            # Clear the "Listening..." line and print speech detected
+                            print(f"\r👂 Listening... ✓", file=sys.stderr, flush=True)
+                            stream.stop_stream()
+                            stream.close()
+                            audio.terminate()
+                            return True
+                    else:
+                        # Reset counter if we don't detect speech
+                        speech_count = 0
+
+                    time.sleep(0.01)
+
+            except KeyboardInterrupt:
+                print(f"\r👂 Listening... cancelled", file=sys.stderr, flush=True)
+                stream.stop_stream()
+                stream.close()
+                audio.terminate()
+                return False
+
+        except Exception as e:
+            if audio:
+                audio.terminate()
+            raise e
+
+    def record_until_silence(self, silence_threshold: float = 0.01, silence_duration: float = 2.0,
+                            wait_for_sound: bool = True) -> str:
         """
         Record audio until silence is detected for a specified duration.
+        Uses speech detection to ignore background noise.
 
         Args:
             silence_threshold: RMS level below which audio is considered silence (0.0-1.0)
             silence_duration: Duration of silence in seconds before stopping
+            wait_for_sound: If True, wait for sound before starting recording
 
         Returns:
             Path to the temporary WAV file
         """
+        # First, wait for sound to be detected
+        if wait_for_sound:
+            if not self.wait_for_sound(sound_threshold=silence_threshold * 2):
+                # User interrupted
+                raise KeyboardInterrupt("Interrupted while waiting for sound")
+
         self.start_recording()
 
         silence_start = None
         consecutive_silence = 0.0
         chunk_duration = self.chunk / self.rate  # Duration of one chunk in seconds
+        has_recorded_speech = False  # Track if we've recorded any actual speech
 
-        print(f"🎤 Recording... (will auto-stop after {silence_duration}s of silence)", file=sys.stderr, flush=True)
+        print(f"🎤 Recording...", file=sys.stderr, flush=True)
 
         try:
             while self.is_recording:
@@ -223,21 +328,26 @@ class VoiceRecorder:
                     data = self.stream.read(self.chunk, exception_on_overflow=False)
                     self.frames.append(data)
 
-                    # Calculate audio level
-                    level = self.get_audio_level(data)
+                    # Use speech detection instead of just audio level
+                    # This way background noise won't prevent silence detection
+                    is_speaking = self.is_speech(data, energy_threshold=silence_threshold)
 
-                    # Check if this chunk is silent
-                    if level < silence_threshold:
-                        if silence_start is None:
-                            silence_start = time.time()
-                        consecutive_silence += chunk_duration
+                    # Check if this chunk contains speech or is silent
+                    if not is_speaking:
+                        # Only start counting silence after we've recorded some speech
+                        if has_recorded_speech:
+                            if silence_start is None:
+                                silence_start = time.time()
+                            consecutive_silence += chunk_duration
 
-                        # Check if we've had enough consecutive silence
-                        if consecutive_silence >= silence_duration:
-                            print(f"🔇 Silence detected for {silence_duration}s, stopping...", file=sys.stderr, flush=True)
-                            break
+                            # Check if we've had enough consecutive silence
+                            if consecutive_silence >= silence_duration:
+                                print(f"🔇 Stopped speaking", file=sys.stderr, flush=True)
+                                break
                     else:
-                        # Reset silence counter if we detect sound
+                        # We've detected speech
+                        has_recorded_speech = True
+                        # Reset silence counter if we detect speech
                         silence_start = None
                         consecutive_silence = 0.0
 
@@ -262,28 +372,13 @@ class VoiceRecorder:
         Returns:
             Transcribed text
         """
-        print("🔄 Transcribing audio...", file=sys.stderr, flush=True)
-        sys.stderr.flush()
+        print("🔄 Transcribing...", file=sys.stderr, flush=True)
 
         # Verify audio file exists
         if not os.path.exists(audio_path):
             raise RuntimeError(f"Audio file not found: {audio_path}")
 
-        file_size = os.path.getsize(audio_path)
-        print(f"   Audio file size: {file_size} bytes", file=sys.stderr, flush=True)
-        sys.stderr.flush()
-
-        if file_size < 1000:  # Less than 1KB is suspicious
-            print(f"   ⚠️  Warning: Audio file is very small ({file_size} bytes)", file=sys.stderr, flush=True)
-            sys.stderr.flush()
-
         try:
-            print("   Loading audio and transcribing (this may take 10-30 seconds)...", file=sys.stderr, flush=True)
-            sys.stderr.flush()
-
-            print(f"   [DEBUG] About to call whisper_model.transcribe()...", file=sys.stderr, flush=True)
-            sys.stderr.flush()
-
             result = self.whisper_model.transcribe(
                 audio_path,
                 language=language,
@@ -291,28 +386,14 @@ class VoiceRecorder:
                 verbose=False  # Suppress Whisper's internal output
             )
 
-            print(f"   [DEBUG] Transcription returned, extracting text...", file=sys.stderr, flush=True)
-            sys.stderr.flush()
-
             transcribed_text = result["text"].strip()
 
-            if transcribed_text:
-                print(f"✅ Transcription complete!", file=sys.stderr, flush=True)
-                preview = transcribed_text[:100] + ("..." if len(transcribed_text) > 100 else "")
-                print(f"   Preview: {preview}", file=sys.stderr, flush=True)
-                sys.stderr.flush()
-            else:
-                print(f"⚠️  Warning: Transcription returned empty text", file=sys.stderr, flush=True)
-                sys.stderr.flush()
+            if not transcribed_text:
+                print(f"⚠️  No speech detected", file=sys.stderr, flush=True)
 
             return transcribed_text
         except Exception as e:
-            print(f"❌ Transcription failed!", file=sys.stderr, flush=True)
-            print(f"   Error: {e}", file=sys.stderr, flush=True)
-            import traceback
-            print("   Full traceback:", file=sys.stderr, flush=True)
-            traceback.print_exc(file=sys.stderr)
-            sys.stderr.flush()
+            print(f"❌ Transcription failed: {e}", file=sys.stderr, flush=True)
             raise RuntimeError(f"Transcription failed: {e}")
 
     def record_and_transcribe(self, duration: Optional[float] = None) -> str:
@@ -362,11 +443,7 @@ def record_until_enter(model_size: str = "base") -> str:
     Returns:
         Transcribed text
     """
-    print(f"\n🔧 Initializing VoiceRecorder with model '{model_size}'...", file=sys.stderr, flush=True)
-    sys.stderr.flush()
     recorder = VoiceRecorder(model_size=model_size)
-    print(f"✅ VoiceRecorder initialized", file=sys.stderr, flush=True)
-    sys.stderr.flush()
 
     # Start recording in a separate thread
     recording_thread = threading.Thread(target=lambda: recorder.start_recording())
@@ -389,51 +466,22 @@ def record_until_enter(model_size: str = "base") -> str:
         pass
 
     # Stop recording
-    print(f"\n🔧 Stopping recording...", file=sys.stderr, flush=True)
-    sys.stderr.flush()
     audio_path = recorder.stop_recording()
-    print(f"   [DEBUG] stop_recording() returned, path: {audio_path}", file=sys.stderr, flush=True)
-    sys.stderr.flush()
-    print(f"   [DEBUG] Waiting for record_thread to finish (join)...", file=sys.stderr, flush=True)
-    sys.stderr.flush()
-    record_thread.join(timeout=5)  # Add 5 second timeout
-    if record_thread.is_alive():
-        print(f"   [DEBUG] WARNING: record_thread is still alive after 5 seconds!", file=sys.stderr, flush=True)
-    else:
-        print(f"   [DEBUG] record_thread finished successfully", file=sys.stderr, flush=True)
-    sys.stderr.flush()
-    print(f"✅ Recording stopped, audio saved", file=sys.stderr, flush=True)
-    sys.stderr.flush()
+    record_thread.join(timeout=5)
 
     # Transcribe
-    print(f"\n🔧 Starting transcription process...", file=sys.stderr, flush=True)
-    sys.stderr.flush()
     try:
-        print(f"   [DEBUG] Calling recorder.transcribe_audio({audio_path})...", file=sys.stderr, flush=True)
-        sys.stderr.flush()
         transcription = recorder.transcribe_audio(audio_path)
-        print(f"   [DEBUG] transcribe_audio() returned: '{transcription[:50]}...'", file=sys.stderr, flush=True)
-        sys.stderr.flush()
-        print(f"✅ Transcription complete!", file=sys.stderr, flush=True)
-        sys.stderr.flush()
         return transcription
     except Exception as e:
         print(f"❌ Transcription failed: {e}", file=sys.stderr, flush=True)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
-        sys.stderr.flush()
         raise
     finally:
         # Clean up
-        print(f"🔧 Cleaning up audio file...", file=sys.stderr, flush=True)
-        sys.stderr.flush()
         try:
             os.unlink(audio_path)
-            print(f"✅ Audio file deleted", file=sys.stderr, flush=True)
-            sys.stderr.flush()
         except Exception as e:
             print(f"⚠️  Warning: Could not delete audio file: {e}", file=sys.stderr, flush=True)
-            sys.stderr.flush()
 
 
 if __name__ == "__main__":
