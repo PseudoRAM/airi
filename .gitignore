@@ -2,3 +2,6 @@
 *.app
 .venv/
 .DS_Store
+FIXES_APPLIED.md
+INSTALL_FFMPEG.md
+*.md

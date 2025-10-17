@@ -183,6 +183,358 @@ conversation_status() {
 }
 
 
+voice_ask() {
+  log "voice_ask() called"
+  
+  # Create a temporary script that will run in Terminal
+  local temp_script
+  temp_script=$(mktemp)
+  
+  cat > "$temp_script" << 'VOICE_SCRIPT_EOF'
+#!/usr/bin/env bash
+set -e
+
+# Add Homebrew to PATH (required for ffmpeg)
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+echo "=========================================="
+echo "   🎤 Voice Ask - AI Walkie-Talkie"
+echo "=========================================="
+echo ""
+
+# Verify ffmpeg is available
+if command -v ffmpeg &> /dev/null; then
+  echo "✓ ffmpeg found: $(which ffmpeg)"
+else
+  echo "❌ Error: ffmpeg not found in PATH"
+  echo "   Install with: brew install ffmpeg"
+  echo "   Press any key to close..."
+  read -n 1 -s
+  exit 1
+fi
+echo ""
+
+# Determine ROOT_DIR and Python
+if [[ -f "/Users/pseudoram/Developer/ai-walkie/Menu.app/Contents/Resources/.venv/bin/python" ]]; then
+  ROOT_DIR="/Users/pseudoram/Developer/ai-walkie/Menu.app/Contents/Resources"
+  PYTHON="$ROOT_DIR/.venv/bin/python"
+  echo "✓ Using Menu.app venv"
+elif [[ -f "/Users/pseudoram/Developer/ai-walkie/.venv/bin/python" ]]; then
+  ROOT_DIR="/Users/pseudoram/Developer/ai-walkie"
+  PYTHON="$ROOT_DIR/.venv/bin/python"
+  echo "✓ Using project venv"
+else
+  ROOT_DIR="/Users/pseudoram/Developer/ai-walkie"
+  PYTHON="python3"
+  echo "✓ Using system python3"
+fi
+
+STATE_DIR="$HOME/Library/Application Support/AnythingLLM-Menu"
+LAST_TXT="$STATE_DIR/last.txt"
+mkdir -p "$STATE_DIR"
+
+echo "✓ Python: $PYTHON"
+echo "✓ Scripts: $ROOT_DIR/scripts"
+echo ""
+
+cd "$ROOT_DIR" || {
+  echo "❌ Error: Cannot change to directory $ROOT_DIR"
+  echo "Press any key to close..."
+  read -n 1 -s
+  exit 1
+}
+
+# Check if voice script exists
+if [[ ! -f "scripts/voice_ask.py" ]]; then
+  echo "❌ Error: voice_ask.py not found at $ROOT_DIR/scripts/voice_ask.py"
+  echo "Press any key to close..."
+  read -n 1 -s
+  exit 1
+fi
+
+# Run voice recording
+echo "Starting voice recording..."
+echo ""
+
+if "$PYTHON" scripts/voice_ask.py 2>&1 | tee /tmp/voice_output.txt; then
+  # Get the last line as the answer
+  answer=$(tail -1 /tmp/voice_output.txt)
+  
+  echo ""
+  echo "✅ Response received!"
+  echo ""
+  
+  # Save answer
+  echo "$answer" > "$LAST_TXT"
+  
+  # Speak the answer
+  VOICE="${TTS_VOICE:-Lee (Premium)}"
+  say -v "$VOICE" "$answer" &
+  
+  echo "=========================================="
+  echo "Press any key to close..."
+  read -n 1 -s
+else
+  echo ""
+  echo "❌ Voice recording failed or was cancelled"
+  echo ""
+  echo "Press any key to close..."
+  read -n 1 -s
+fi
+
+rm -f /tmp/voice_output.txt
+VOICE_SCRIPT_EOF
+
+  chmod +x "$temp_script"
+  
+  # Open Terminal and run the script
+  osascript <<EOF
+tell application "Terminal"
+  activate
+  do script "$temp_script && rm '$temp_script'"
+end tell
+EOF
+
+  log "voice_ask() Terminal window opened"
+}
+
+
+voice_conversation() {
+  log "voice_conversation() called"
+  
+  # Create a temporary script that will run in Terminal
+  local temp_script
+  temp_script=$(mktemp)
+  
+  cat > "$temp_script" << 'VOICE_SCRIPT_EOF'
+#!/usr/bin/env bash
+set -e
+
+# Add Homebrew to PATH (required for ffmpeg)
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+echo "=========================================="
+echo "   🎤 Voice Conversation - AI Walkie"
+echo "=========================================="
+echo ""
+
+# Verify ffmpeg is available
+if command -v ffmpeg &> /dev/null; then
+  echo "✓ ffmpeg found: $(which ffmpeg)"
+else
+  echo "❌ Error: ffmpeg not found in PATH"
+  echo "   Install with: brew install ffmpeg"
+  echo "   Press any key to close..."
+  read -n 1 -s
+  exit 1
+fi
+echo ""
+
+# Determine ROOT_DIR and Python
+if [[ -f "/Users/pseudoram/Developer/ai-walkie/Menu.app/Contents/Resources/.venv/bin/python" ]]; then
+  ROOT_DIR="/Users/pseudoram/Developer/ai-walkie/Menu.app/Contents/Resources"
+  PYTHON="$ROOT_DIR/.venv/bin/python"
+  echo "✓ Using Menu.app venv"
+elif [[ -f "/Users/pseudoram/Developer/ai-walkie/.venv/bin/python" ]]; then
+  ROOT_DIR="/Users/pseudoram/Developer/ai-walkie"
+  PYTHON="$ROOT_DIR/.venv/bin/python"
+  echo "✓ Using project venv"
+else
+  ROOT_DIR="/Users/pseudoram/Developer/ai-walkie"
+  PYTHON="python3"
+  echo "✓ Using system python3"
+fi
+
+STATE_DIR="$HOME/Library/Application Support/AnythingLLM-Menu"
+LAST_TXT="$STATE_DIR/last.txt"
+mkdir -p "$STATE_DIR"
+
+echo "✓ Python: $PYTHON"
+echo "✓ Scripts: $ROOT_DIR/scripts"
+echo ""
+
+cd "$ROOT_DIR" || {
+  echo "❌ Error: Cannot change to directory $ROOT_DIR"
+  echo "Press any key to close..."
+  read -n 1 -s
+  exit 1
+}
+
+# Check if voice script exists
+if [[ ! -f "scripts/voice_ask.py" ]]; then
+  echo "❌ Error: voice_ask.py not found at $ROOT_DIR/scripts/voice_ask.py"
+  echo "Press any key to close..."
+  read -n 1 -s
+  exit 1
+fi
+
+# Run voice recording with conversation mode
+echo "Starting voice conversation..."
+echo ""
+
+if "$PYTHON" scripts/voice_ask.py --conversation 2>&1 | tee /tmp/voice_output.txt; then
+  # Get the last line as the answer
+  answer=$(tail -1 /tmp/voice_output.txt)
+  
+  echo ""
+  echo "✅ Response received!"
+  echo ""
+  
+  # Save answer
+  echo "$answer" > "$LAST_TXT"
+  
+  # Speak the answer
+  VOICE="${TTS_VOICE:-Lee (Premium)}"
+  say -v "$VOICE" "$answer" &
+  
+  echo "=========================================="
+  echo "Press any key to close..."
+  read -n 1 -s
+else
+  echo ""
+  echo "❌ Voice recording failed or was cancelled"
+  echo ""
+  echo "Press any key to close..."
+  read -n 1 -s
+fi
+
+rm -f /tmp/voice_output.txt
+VOICE_SCRIPT_EOF
+
+  chmod +x "$temp_script"
+  
+  # Open Terminal and run the script
+  osascript <<EOF
+tell application "Terminal"
+  activate
+  do script "$temp_script && rm '$temp_script'"
+end tell
+EOF
+
+  log "voice_conversation() Terminal window opened"
+}
+
+
+live_conversation() {
+  log "live_conversation() called"
+
+  # Create a temporary script that will run in Terminal
+  local temp_script
+  temp_script=$(mktemp)
+
+  cat > "$temp_script" << 'LIVE_SCRIPT_EOF'
+#!/usr/bin/env bash
+set -e
+
+# Add Homebrew to PATH (required for ffmpeg)
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+echo "=========================================="
+echo "   🎙️  Live Conversation Mode"
+echo "=========================================="
+echo ""
+
+# Verify ffmpeg is available
+if command -v ffmpeg &> /dev/null; then
+  echo "✓ ffmpeg found: $(which ffmpeg)"
+else
+  echo "❌ Error: ffmpeg not found in PATH"
+  echo "   Install with: brew install ffmpeg"
+  echo "   Press any key to close..."
+  read -n 1 -s
+  exit 1
+fi
+echo ""
+
+# Determine ROOT_DIR and Python
+if [[ -f "/Users/pseudoram/Developer/ai-walkie/Menu.app/Contents/Resources/.venv/bin/python" ]]; then
+  ROOT_DIR="/Users/pseudoram/Developer/ai-walkie/Menu.app/Contents/Resources"
+  PYTHON="$ROOT_DIR/.venv/bin/python"
+  echo "✓ Using Menu.app venv"
+elif [[ -f "/Users/pseudoram/Developer/ai-walkie/.venv/bin/python" ]]; then
+  ROOT_DIR="/Users/pseudoram/Developer/ai-walkie"
+  PYTHON="$ROOT_DIR/.venv/bin/python"
+  echo "✓ Using project venv"
+else
+  ROOT_DIR="/Users/pseudoram/Developer/ai-walkie"
+  PYTHON="python3"
+  echo "✓ Using system python3"
+fi
+
+STATE_DIR="$HOME/Library/Application Support/AnythingLLM-Menu"
+CONFIG_FILE="$STATE_DIR/.env"
+mkdir -p "$STATE_DIR"
+
+echo "✓ Python: $PYTHON"
+echo "✓ Scripts: $ROOT_DIR/scripts"
+echo ""
+
+# Load TTS voice setting from config
+if [[ -f "$CONFIG_FILE" ]]; then
+  source "$CONFIG_FILE"
+fi
+VOICE="${TTS_VOICE:-Lee (Premium)}"
+echo "✓ TTS Voice: $VOICE"
+echo ""
+
+cd "$ROOT_DIR" || {
+  echo "❌ Error: Cannot change to directory $ROOT_DIR"
+  echo "Press any key to close..."
+  read -n 1 -s
+  exit 1
+}
+
+# Check if live conversation script exists
+if [[ ! -f "scripts/live_conversation.py" ]]; then
+  echo "❌ Error: live_conversation.py not found at $ROOT_DIR/scripts/live_conversation.py"
+  echo "Press any key to close..."
+  read -n 1 -s
+  exit 1
+fi
+
+# Start live conversation loop with TTS
+echo "Starting live conversation mode..."
+echo ""
+echo "🎙️  Speak naturally - the system will detect when you stop"
+echo "🔇 After 2 seconds of silence, it will process your speech"
+echo "🤖 The AI will respond and speak back to you"
+echo "🔁 This will loop continuously until you press Ctrl+C"
+echo ""
+
+# Run the Python script and pipe each response through say
+"$PYTHON" scripts/live_conversation.py 2>&1 | while IFS= read -r line; do
+  # Check if this line looks like an AI response (not stderr output with emojis/formatting)
+  # We'll speak lines that are printed to stdout by the Python script
+  # The Python script prints the answer to stdout after the "AI:" message to stderr
+  if [[ ! "$line" =~ ^[🎙️🔧🔇📝💭🤖✅❌⚠️━═] ]] && [[ -n "$line" ]]; then
+    # This is the AI response, speak it
+    say -v "$VOICE" "$line" &
+  fi
+  # Always echo the line to show progress
+  echo "$line"
+done
+
+echo ""
+echo "=========================================="
+echo "Live conversation ended."
+echo "Press any key to close..."
+read -n 1 -s
+LIVE_SCRIPT_EOF
+
+  chmod +x "$temp_script"
+
+  # Open Terminal and run the script
+  osascript <<EOF
+tell application "Terminal"
+  activate
+  do script "$temp_script && rm '$temp_script'"
+end tell
+EOF
+
+  log "live_conversation() Terminal window opened"
+}
+
+
 copy_last() {
   [[ -f "$LAST_TXT" ]] || exit 0
   cat "$LAST_TXT" | pbcopy
@@ -201,8 +553,12 @@ view_logs() {
 if [[ $# -eq 0 ]]; then
   log "Rendering menu items (no args)"
   echo "Ask…"
+  echo "🎤 Voice Ask…"
   echo "----"
   echo "Conversation…"
+  echo "🎤 Voice Conversation…"
+  echo "🎙️ Start Live Conversation"
+  echo "----"
 
   # Show conversation status if available
   conv_status=$(conversation_status)
@@ -233,9 +589,21 @@ case "$1" in
     log "Action: ask"
     ask
     ;;
+  "🎤 Voice Ask…")
+    log "Action: voice_ask"
+    voice_ask
+    ;;
   "Conversation…")
     log "Action: conversation_ask"
     conversation_ask
+    ;;
+  "🎤 Voice Conversation…")
+    log "Action: voice_conversation"
+    voice_conversation
+    ;;
+  "🎙️ Start Live Conversation")
+    log "Action: live_conversation"
+    live_conversation
     ;;
   "Clear Conversation")
     log "Action: conversation_clear"

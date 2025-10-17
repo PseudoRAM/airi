@@ -33,13 +33,9 @@ class ConversationManager:
             system_prompt: Optional system prompt to set conversation context
             log_path: Path to conversation log file. Defaults to ~/Library/Application Support/AnythingLLM-Menu/conversation.log
         """
-        self.llm = ChatOpenAI(
-            openai_api_key=API_KEY,
-            openai_api_base=OPENAI_BASE,
-            model=WORKSPACE_SLUG,
-            temperature=0.7,
-        )
-
+        # Don't create LLM in __init__, create it lazily to allow pickling
+        self._llm = None
+        
         self.system_prompt = system_prompt or "You are a helpful, concise assistant."
         self.conversation_history: List[Tuple[str, str]] = []
 
@@ -51,6 +47,30 @@ class ConversationManager:
 
         self.log_path = log_path
         self._log(f"=== New conversation session started ===")
+    
+    @property
+    def llm(self):
+        """Lazy-load the LLM to allow pickling."""
+        if self._llm is None:
+            self._llm = ChatOpenAI(
+                openai_api_key=API_KEY,
+                openai_api_base=OPENAI_BASE,
+                model=WORKSPACE_SLUG,
+                temperature=0.7,
+            )
+        return self._llm
+    
+    def __getstate__(self):
+        """Prepare object for pickling by removing unpicklable LLM."""
+        state = self.__dict__.copy()
+        # Remove the unpicklable LLM object
+        state['_llm'] = None
+        return state
+    
+    def __setstate__(self, state):
+        """Restore object from pickle, LLM will be recreated on first use."""
+        self.__dict__.update(state)
+        # LLM will be recreated lazily when needed
 
     def _log(self, message: str) -> None:
         """Write a timestamped message to the log file."""

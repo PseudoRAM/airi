@@ -7,7 +7,9 @@ A macOS application suite for interacting with AnythingLLM through both a menu b
 This project provides two ways to interact with your local AnythingLLM instance:
 
 1. **Menu Bar App** (`Menu.app`): A macOS menu bar application that gives you quick access to ask questions to AnythingLLM via a simple dialog interface
-   - Ask questions through a popup dialog
+   - Ask questions through a popup dialog or **voice recording** 🎤
+   - Maintain multi-turn conversations with context
+   - Voice responses spoken aloud automatically
    - View and copy previous answers
    - Access debug logs
 
@@ -16,13 +18,14 @@ This project provides two ways to interact with your local AnythingLLM instance:
    - Responses are spoken aloud using macOS text-to-speech
    - Command support: `/help`, `/exit`, `/clear`, `/history`
 
-Both interfaces connect to AnythingLLM's OpenAI-compatible API using LangChain.
+Both interfaces connect to AnythingLLM's OpenAI-compatible API using LangChain. **Voice input** uses OpenAI's Whisper model for speech-to-text transcription (runs locally).
 
 ## Requirements
 
 - macOS (for menu bar integration and text-to-speech)
 - Python 3.8 or higher
 - [AnythingLLM](https://anythingllm.com/) running locally or accessible via network
+- **ffmpeg** (required for voice recording): `brew install ffmpeg`
 - [Platypus](https://sveinbjorn.org/platypus) (optional, only needed to rebuild the menu bar app)
 
 ## Setup
@@ -41,13 +44,23 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3. Install dependencies
+### 3. Install system dependencies
+
+Voice recording requires ffmpeg:
+
+```bash
+brew install ffmpeg
+```
+
+### 4. Install Python dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Configure environment variables
+**Note:** This includes OpenAI Whisper for voice recording features. First-time setup will download the Whisper model (~150MB for base model).
+
+### 5. Configure environment variables
 
 Copy the sample environment file and edit it with your settings:
 
@@ -73,7 +86,7 @@ Optional configuration:
 - `TTS_VOICE`: Voice to use for walkie.sh text-to-speech (default: "Lee (Premium)")
   - Run `say -v ?` to see all available voices
 
-### 5. Test the connection
+### 6. Test the connection
 
 Test that everything is configured correctly:
 
@@ -112,10 +125,18 @@ Double-click `Menu.app` to launch the menu bar application. The app will appear 
 **First run**: The app will copy `.env.sample` to `~/Library/Application Support/AnythingLLM-Menu/.env` and prompt you to configure it.
 
 Features:
-- **Ask…**: Opens a dialog to ask a question
+- **Ask…**: Opens a dialog to ask a question (text input)
+- **🎤 Voice Ask…**: Record your question with voice and get a spoken response
+- **Conversation…**: Continue a multi-turn text conversation
+- **🎤 Voice Conversation…**: Continue a conversation using voice input/output
+- **Clear Conversation**: Reset conversation history
 - **Copy last answer**: Copies the previous answer to clipboard
 - **Last: [preview]**: Opens the last answer in TextEdit
 - **View Logs**: Opens the debug log in Console.app
+
+**Voice Features**: Click any voice menu item to open Terminal. Press Enter to start recording, speak your question, then press Enter again to stop. The AI's response will be spoken aloud automatically. Terminal is used for interactive recording control and visual feedback.
+
+📖 **Voice Setup**: See [VOICE_SETUP.md](VOICE_SETUP.md) for detailed voice recording setup instructions.
 
 ### Command Line Interface
 
@@ -145,10 +166,15 @@ ai-walkie/
 │   ├── ask_anythingllm.py       # CLI entry point for single questions
 │   ├── converse.py              # Interactive conversation script
 │   ├── conversation_manager.py  # Manages conversation history/context
+│   ├── conversation_cli.py      # CLI for persistent conversations
+│   ├── voice_recorder.py        # Voice recording and Whisper transcription
+│   ├── voice_ask.py             # Voice-activated question asking
 │   └── test_anythingllm.py      # Connection testing utility
 ├── .env.sample            # Sample environment configuration
-├── requirements.txt       # Python dependencies
-└── README.md             # This file
+├── requirements.txt       # Python dependencies (includes Whisper)
+├── README.md              # This file
+├── VOICE_SETUP.md         # Voice recording setup guide
+└── WALKIE_README.md       # Walkie-talkie detailed documentation
 ```
 
 ## How It Works
