@@ -368,8 +368,9 @@ if [[ ! -f "scripts/voice_ask.py" ]]; then
   exit 1
 fi
 
-# Run voice recording with conversation mode
+# Run voice recording with conversation mode in a loop
 echo "Starting voice conversation..."
+echo "Press Ctrl+C to exit at any time"
 echo ""
 
 # Load TTS voice from config
@@ -380,39 +381,49 @@ if [[ -f "$CONFIG_FILE" ]]; then
 fi
 VOICE="${TTS_VOICE:-Lee (Premium)}"
 
-# Use a temp file to capture just the answer (stdout)
-ANSWER_FILE=$(mktemp)
+# Continuous conversation loop
+while true; do
+  # Use a temp file to capture just the answer (stdout only)
+  ANSWER_FILE=$(mktemp)
 
-# Run with unbuffered output, show all progress, capture answer separately
-"$PYTHON" -u scripts/voice_ask.py --conversation 2>&1 | tee "$ANSWER_FILE"
-EXIT_CODE=${PIPESTATUS[0]}
+  # Run with unbuffered output, stderr displays progress, stdout goes to file
+  "$PYTHON" -u scripts/voice_ask.py --conversation > "$ANSWER_FILE"
+  EXIT_CODE=$?
 
-if [[ $EXIT_CODE -eq 0 ]]; then
-  # Get the last line as the answer
-  answer=$(tail -1 "$ANSWER_FILE")
+  if [[ $EXIT_CODE -eq 0 ]]; then
+    # Get the full answer (all of stdout)
+    answer=$(cat "$ANSWER_FILE")
 
-  echo ""
-  echo "✅ Response received!"
-  echo ""
+    echo ""
+    echo "✅ Response received!"
+    echo ""
+    echo "$answer"
+    echo ""
 
-  # Save answer
-  echo "$answer" > "$LAST_TXT"
+    # Save answer
+    echo "$answer" > "$LAST_TXT"
 
-  # Speak the answer (blocking - wait for it to finish)
-  say -v "$VOICE" "$answer"
+    # Speak the answer (blocking - wait for it to finish)
+    say -v "$VOICE" "$answer"
 
-  echo "=========================================="
-  echo "Press any key to close..."
-  read -n 1 -s
-else
-  echo ""
-  echo "❌ Voice recording failed or was cancelled"
-  echo ""
-  echo "Press any key to close..."
-  read -n 1 -s
-fi
+    echo ""
+    echo "=========================================="
+    echo ""
+    # Loop automatically continues to next exchange
+  else
+    # User cancelled or error occurred
+    echo ""
+    echo "👋 Exiting voice conversation..."
+    echo ""
+    break
+  fi
 
-rm -f "$ANSWER_FILE"
+  rm -f "$ANSWER_FILE"
+done
+
+# Final cleanup
+echo "Press any key to close..."
+read -n 1 -s
 VOICE_SCRIPT_EOF
 
   chmod +x "$temp_script"
